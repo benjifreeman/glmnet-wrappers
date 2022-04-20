@@ -47,13 +47,14 @@ tuned_glmnet_cox <- function(data.train,
     if (is.null(data.test)){
         message("No testing data provided - was this intentional?")
     } else {
+        
+        # Preprocess testing data
+        data.test <- data.test %>% preprocess_data()
+        
         # Check that training and testing data have the same variables
         if (!setequal(colnames(data.train),colnames(data.test))){
             stop("training and testing data do not have the same variables")
         }
-        
-        # Preprocess testing data
-        data.test <- data.test %>% preprocess_data()
         
         # Reconstruct test/train split (if testing data was provided)
         data <- bind_rows(data.train, data.test)
@@ -110,12 +111,12 @@ tuned_glmnet_cox <- function(data.train,
     
     # Select best penalty and mixture
     if (cv.metric == "deviance"){
-        best.lambda <- cv.res %>% slice_min(order_by = mean) %>% slice_head(n=1) %>% pull(penalty)
-        best.mixture <- cv.res %>% slice_min(order_by = mean) %>% slice_head(n=1) %>% pull(mixture)
+        best.regs <- cv.scores %>% slice_min(order_by = mean) %>% slice_head(n=1)
     } else if (cv.metric == "C"){
-        best.lambda <- cv.res %>% slice_max(order_by = mean) %>% slice_head(n=1) %>% pull(penalty)
-        best.mixture <- cv.res %>% slice_max(order_by = mean) %>% slice_head(n=1) %>% pull(mixture)
+        best.regs <- cv.scores %>% slice_max(order_by = mean) %>% slice_head(n=1)
     }
+    best.lambda <- best.regs$penalty
+    best.mixture <- best.regs$mixture
     
     # Refit with best lambda and mixture
     trained.fit <- glmnet(y=out.train,
@@ -138,7 +139,7 @@ tuned_glmnet_cox <- function(data.train,
         return(list(fit = model.coeffs,
                     best.params = best.regs,
                     final.model = trained.fit,
-                    cv.scores = cv.metrics))
+                    cv.scores = cv.scores))
         
     # Otherwise, proceed to testing
     } else if (!is.null(data.test)){
@@ -153,7 +154,7 @@ tuned_glmnet_cox <- function(data.train,
                               .estimate = sapply(fit.metrics.list,simplify = T,
                                                  function(x){x}))
         
-        return(list(cv.scores = cv.metrics,
+        return(list(cv.scores = cv.scores,
                     best.params=best.regs,
                     final.model=trained.fit,
                     fit=model.coeffs,
