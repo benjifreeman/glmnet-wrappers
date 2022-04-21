@@ -4,7 +4,8 @@ tuned_glmnet_cox <- function(data.train,
                              cv.metric = "deviance",
                              n.repeats = 5,
                              n.levels = c(100,25),
-                             n.folds = 10){
+                             n.folds = 10,
+                             seed = 18){
     
     # Predicts a time-to-event outcome (specified by `data.train$time and data.train$event`)
     # w/ cross-validated logistic regression on training data (`data.train`)
@@ -12,6 +13,9 @@ tuned_glmnet_cox <- function(data.train,
     
     require(glmnet)
     require(tidymodels)
+    
+    # Set seed for reproducibility
+    set.seed(seed)
     
     # Define preprocessing steps:
         # assign roles to variables
@@ -75,39 +79,52 @@ tuned_glmnet_cox <- function(data.train,
     
     
     # Create grid for penalty and mixture values:
-    cv.grid <- grid_regular(penalty(),mixture(),levels = n.levels)
-
-    # Define fold indices: 
-        # get a sequence of one to n.folds,
-        # repeat enough times to cover all samples, 
-        # truncate length to number of training samples,
-        # randomly shuffle
-    fold.id <- rep(1:n.folds,
-                   times = ceiling(length(out.train)/n.folds))[1:length(out.train)] %>% 
-        sample(size=length(out.train),
-               replace = F)
+    cv.grid <- grid_regular(extract_parameter_set_dials(linear_reg(penalty = tune(), mixture = tune()) %>%
+                                                            set_engine("glmnet")),levels=n.levels)
     
-    # Loop through mixture (alpha) values because cv.glmnet will not do so automatically
-    # note: using cv.glmnet here because tidymodels::tune() does not yet support cox regressions
+    # Cross-validation will be repeated `n.repeats` times
+    cv.scores <- map_dfr(1:n.repeats,function(repeat.id){
+        
+        # Define fold indices: 
+            # get a sequence of one to n.folds,
+            # repeat enough times to cover all samples, 
+            # truncate length to number of training samples,
+            # randomly shuffle
+        fold.id <- rep(1:n.folds,
+                       times = ceiling(length(out.train)/n.folds))[1:length(out.train)] %>% 
+            sample(size=length(out.train),
+                   replace = F)
+        
+        # Loop through mixture (alpha) values because cv.glmnet will not do so automatically
+        # note: using cv.glmnet here because tidymodels::tune() does not yet support cox regressions
+        map_dfr(unique(cv.grid$mixture),function(alpha.cv){
+            
+            # There are convergence issues with providing a fixed lambda sequence....
+            cv.res.tmp <- cv.glmnet(y=out.train,
+                                    x=pred.train,
+                                    family = "cox",
+                                    type.measure = cv.metric,
+                                    # lambda = unique(cv.grid$penalty),
+                                    foldid = fold.id,
+                                    alpha=alpha.cv)
+            
+            # Store lambda, mixture, and deviance values
+            tibble(penalty = cv.res.tmp$lambda,
+                   mixture = alpha.cv,
+                   fold.mean = cv.res.tmp$cvm,
+                   rep = repeat.id
+            )
+            
+        }) 
+        
+    }) %>% 
+        # average erros across repeats
+        group_by(penalty,mixture) %>% 
+        summarize(mean = mean(fold.mean)) %>% 
+        ungroup() %>% 
+        mutate(.metric = cv.metric,
+               n = n.folds*n.repeats)
     
-    cv.scores <- map_dfr(unique(cv.grid$mixture),function(alpha.cv){
-        
-        cv.res.tmp <- cv.glmnet(y=out.train,
-                                x=pred.train,
-                                family = "cox",
-                                type.measure = cv.metric,
-                                lambda = unique(cv.grid$penalty),
-                                foldid = fold.id,
-                                alpha=alpha.cv)
-        
-        # Store lambda, mixture, and deviance values
-        tibble(penalty = cv.res.tmp$lambda,
-               mixture = alpha.cv,
-               .metric = cv.metric,
-               mean = cv.res.tmp$cvm,
-               std_err = cv.res.tmp$cvsd
-        )
-    })
     
     # Select best penalty and mixture
     if (cv.metric == "deviance"){
@@ -115,6 +132,7 @@ tuned_glmnet_cox <- function(data.train,
     } else if (cv.metric == "C"){
         best.regs <- cv.scores %>% slice_max(order_by = mean) %>% slice_head(n=1)
     }
+    
     best.lambda <- best.regs$penalty
     best.mixture <- best.regs$mixture
     
@@ -162,16 +180,3 @@ tuned_glmnet_cox <- function(data.train,
     }
 }
 
-plot_cv_deviance <- function(cv.scores){
-    
-    # plots contours of cross-validation MAE
-    # red dot flags minimum deviance
-    cv.scores %>% 
-        filter(.metric == "deviance") %>%
-        ggplot(aes(x=log10(penalty),
-                   y=mixture,
-                   z=mean))+
-        geom_contour_filled()+
-        geom_point(data= . %>% slice_min(mean), color="red")+
-        theme_classic()
-}

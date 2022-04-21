@@ -4,6 +4,7 @@ tuned_glmnet_bin <- function(data.train,
                              n.repeats = 5,
                              n.levels = c(100,25),
                              cv.metric = "accuracy",
+                             seed = 18,
                              outcome.var){
     
     # Binarizes a continous outcome (specified by `outcome.var`)
@@ -11,6 +12,9 @@ tuned_glmnet_bin <- function(data.train,
     # if testing data (`data.test`) is provided, provides ROC curve and assesses models
     
     require(tidymodels)
+    
+    # Set seed for reproducibility
+    set.seed(seed)
     
     if (is.null(data.test)){
         message("No testing data provided - was this intentional?")
@@ -59,7 +63,7 @@ tuned_glmnet_bin <- function(data.train,
         set_engine("glmnet")
     
     # Create grid for penalty and mixture values:
-    lambda.grid <- grid_regular(penalty(),mixture(),levels=n.levels)
+    lambda.grid <- grid_regular(extract_parameter_set_dials(tune.spec),levels=n.levels)
     
     # Set up folds for cross-validation:
     cv.folds <- vfold_cv(data.train, v = n.folds, repeats = n.repeats)
@@ -147,23 +151,6 @@ tuned_glmnet_bin <- function(data.train,
         
     }
 
-}
-
-
-plot_cv_accuracy <- function(cv.scores){
-    
-    # plots countours of cross-validation accuracy
-    # red dot flags the maximum accuracy
-    
-    require(ggplot2)
-    cv.scores %>% 
-        filter(.metric == "accuracy") %>%
-        ggplot(aes(x=log10(penalty),
-                   y=mixture,
-                   z=mean))+
-        geom_contour_filled()+
-        geom_point(data=. %>% slice_max(mean), color="red")+
-        theme_classic()
 }
 
 

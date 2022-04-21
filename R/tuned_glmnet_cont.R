@@ -5,6 +5,7 @@ tuned_glmnet_cont <- function(data.train,
                               n.repeats = 5,
                               n.levels = c(100,25),
                               cv.metric = "mae",
+                              seed = 18,
                               outcome.var){
     
     # Predicts a continous outcome (specified by `outcome.var`)
@@ -12,6 +13,9 @@ tuned_glmnet_cont <- function(data.train,
     # If testing data (`data.test`) is provided, assesses models w/ standard metrics
     
     require(tidymodels)
+    
+    # set seed for reproducibility
+    set.seed(seed)
     
     if (is.null(data.test)){
         message("No testing data provided - was this intentional?")
@@ -49,7 +53,7 @@ tuned_glmnet_cont <- function(data.train,
         set_engine("glmnet")
     
     # Create grid for penalty and mixture values:
-    lambda.grid <- grid_regular(penalty(),mixture(),levels=n.levels)
+    lambda.grid <- grid_regular(extract_parameter_set_dials(tune.spec),levels=n.levels)
     
     # Set up folds for cross-validation:
     cv.folds <- vfold_cv(data.train, v = n.folds, repeats = n.repeats)
@@ -119,20 +123,6 @@ tuned_glmnet_cont <- function(data.train,
 }
 
 
-plot_cv_mae <- function(cv.scores){
-    
-    # plots countours of cross-validation MAE
-    # red dot flags the minimum MAE
-    
-    require(ggplot2)
-    cv.scores %>% 
-        filter(.metric == "mae") %>%
-        ggplot(aes(x=log10(penalty),
-                   y=mixture,
-                   z=mean))+
-        geom_contour_filled()+
-        geom_point(data= . %>% slice_min(mean), color="red")+
-        theme_classic()
-}
+
 
 
